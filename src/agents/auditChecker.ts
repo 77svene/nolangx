@@ -1,7 +1,7 @@
 /**
  * NoLangX Static Code Analyzer
  * Slither-like pattern matching for Solidity vulnerability detection
- * Outputs risk score 0-100 with detailed issue list
+ * Outputs risk score 0-100 and detailed issue list
  */
 
 export interface AuditIssue {
@@ -14,6 +14,7 @@ export interface AuditIssue {
 }
 
 export interface AuditReport {
+  code: string;
   riskScore: number; // 0-100
   issues: AuditIssue[];
   summary: {
@@ -36,95 +37,80 @@ const SEVERITY_WEIGHTS = {
 };
 
 /**
- * Reentrancy Detection
- * Pattern: external call before state update in same function
+ * Check for reentrancy vulnerabilities
+ * Pattern: external calls before state updates (checks-effects-interactions violation)
  */
 function checkReentrancy(code: string): AuditIssue[] {
   const issues: AuditIssue[] = [];
   const lines = code.split('\n');
   
-  // Track function boundaries and state changes
+  // Track state variables and external calls
+  const stateVarPattern = /(?:public|private|internal)?\s*(?:uint|address|bool|mapping|struct)\s+\w+\s*;/g;
+  const externalCallPattern = /(?:call|send|transfer|staticcall|delegatecall)\s*\(/g;
+  const stateWritePattern = /(?:\w+\s*=|\+\+=|\-\-=|\*\*=|\/\/=|%\%=)/g;
+  
   let inFunction = false;
-  let functionName = '';
   let functionStartLine = 0;
+  let hasStateWrite = false;
   let hasExternalCall = false;
   let externalCallLine = 0;
-  let hasStateUpdate = false;
-  let stateUpdateLine = 0;
-  let braceCount = 0;
-  
-  const externalCallPatterns = [
-    /\.call\(/,
-    /\.delegateCall\(/,
-    /\.staticCall\(/,
-    /transfer\(/,
-    /send\(/,
-    /\w+\.\w+\(/ // external contract calls
-  ];
-  
-  const stateUpdatePatterns = [
-    /\s+\w+\s*=\s*/,
-    /\s+\w+\s*\+=\s*/,
-    /\s+\w+\s*\-=\s*/,
-    /mapping\[.*\]\s*=\s*/,
-    /\w+\[.*\]\s*=\s*/
-  ];
+  let lastStateWriteLine = 0;
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const lineNum = i + 1;
     
     // Detect function start
-    const funcMatch = line.match(/function\s+(\w+)\s*\(/);
-    if (funcMatch && !line.includes('function ' + funcMatch[1] + ' internal')) {
+    if (/function\s+\w+\s*\(/.test(line)) {
       inFunction = true;
-      functionName = funcMatch[1];
       functionStartLine = lineNum;
+      hasStateWrite = false;
       hasExternalCall = false;
-      hasStateUpdate = false;
-      braceCount = 0;
+    }
+    
+    // Detect function end
+    if (inFunction && /^\s*\}\s*$/.test(line)) {
+      // Check if external call happened before state update
+      if (hasExternalCall && hasStateWrite && externalCallLine < lastStateWriteLine) {
+        issues.push({
+          severity: 'critical',
+          category: 'reentrancy',
+          line: externalCallLine,
+          pattern: 'external-call-before-state-update',
+          description: 'External call made before state variable update - potential reentrancy vulnerability',
+          recommendation: 'Follow checks-effects-interactions pattern: update state before making external calls'
+        });
+      }
+      inFunction = false;
     }
     
     if (inFunction) {
-      braceCount += (line.match(/\{/g) || []).length;
-      braceCount -= (line.match(/\}/g) || []).length;
-      
-      // Check for external calls
-      if (!hasExternalCall) {
-        for (const pattern of externalCallPatterns) {
-          if (pattern.test(line) && !line.trim().startsWith('//')) {
-            hasExternalCall = true;
-            externalCallLine = lineNum;
-            break;
-          }
-        }
+      if (stateWritePattern.test(line)) {
+        hasStateWrite = true;
+        lastStateWriteLine = lineNum;
       }
-      
-      // Check for state updates after external call
-      if (hasExternalCall && !hasStateUpdate) {
-        for (const pattern of stateUpdatePatterns) {
-          if (pattern.test(line) && !line.trim().startsWith('//')) {
-            hasStateUpdate = true;
-            stateUpdateLine = lineNum;
-            break;
-          }
-        }
+      if (externalCallPattern.test(line)) {
+        hasExternalCall = true;
+        externalCallLine = lineNum;
       }
-      
-      // Function ended - check for reentrancy pattern
-      if (braceCount === 0 && inFunction) {
-        if (hasExternalCall && hasStateUpdate && externalCallLine < stateUpdateLine) {
-          issues.push({
-            severity: 'critical',
-            category: 'reentrancy',
-            line: externalCallLine,
-            pattern: 'external-call-before-state-update',
-            description: `Function '${functionName}' makes external call at line ${externalCallLine} before updating state at line ${stateUpdateLine}`,
-            recommendation: 'Apply checks-effects-interactions pattern: update state before external calls'
-          });
-        }
-        inFunction = false;
-      }
+    }
+  }
+  
+  // Check for .call() without reentrancy guard
+  const callWithoutGuard = /\.call\s*\(/g;
+  let match;
+  while ((match = callWithoutGuard.exec(code)) !== null) {
+    const beforeCall = code.substring(0, match.index);
+    if (!/nonReentrant|ReentrancyGuard|mutex/.test(beforeCall)) {
+      const lineNum = (beforeCall.match(/\n/g) || []).length + 1;
+      issues.push({
+        severity: 'high',
+        category: 'reentrancy',
+        line: lineNum,
+        pattern: 'call-without-reentrancy-guard',
+        description: 'Low-level .call() used without reentrancy protection',
+        recommendation: 'Use OpenZeppelin ReentrancyGuard or implement mutex lock'
+      });
     }
   }
   
@@ -132,252 +118,247 @@ function checkReentrancy(code: string): AuditIssue[] {
 }
 
 /**
- * Overflow/Underflow Detection
- * Pattern: uint256 arithmetic without SafeMath or Solidity 0.8+ checks
+ * Check for arithmetic overflow/underflow
+ * Pattern: uint256 arithmetic without SafeMath or Solidity 0.8+ checked arithmetic
  */
 function checkOverflow(code: string): AuditIssue[] {
   const issues: AuditIssue[] = [];
   const lines = code.split('\n');
   
   // Check pragma version
-  const pragmaMatch = code.match(/pragma\s+solidity\s+\^?([0-9.]+)/);
-  const solidityVersion = pragmaMatch ? pragmaMatch[1] : '0.0.0';
-  const isSafeVersion = solidityVersion >= '0.8.0';
+  const pragmaMatch = code.match(/pragma\s+solidity\s+\^?([0-9]+)\.([0-9]+)\.([0-9]+)/);
+  const hasSafeVersion = pragmaMatch && (
+    parseInt(pragmaMatch[1]) > 0 || 
+    (parseInt(pragmaMatch[1]) === 0 && parseInt(pragmaMatch[2]) >= 8)
+  );
   
   // Check for SafeMath import
-  const hasSafeMath = /import.*SafeMath/.test(code) || /using\s+SafeMath/.test(code);
+  const hasSafeMath = /import.*SafeMath|using\s+SafeMath/.test(code);
   
-  // Only check if not using safe version or SafeMath
-  if (isSafeVersion || hasSafeMath) {
+  // If Solidity 0.8+ or SafeMath, overflow is handled
+  if (hasSafeVersion || hasSafeMath) {
     return issues;
   }
   
-  const arithmeticPatterns = [
-    { pattern: /\+\+/g, op: 'increment' },
-    { pattern: /--/g, op: 'decrement' },
-    { pattern: /\+=/g, op: 'addition assignment' },
-    { pattern: /-=/g, op: 'subtraction assignment' },
-    { pattern: /\*=/g, op: 'multiplication assignment' },
-    { pattern: /\/=\s*[^/]/g, op: 'division assignment' },
-    { pattern: /[^=]\+[^+]/g, op: 'addition' },
-    { pattern: /[^=]-[^-]/g, op: 'subtraction' },
-    { pattern: /[^=]\*[^*]/g, op: 'multiplication' }
+  // Check for unsafe arithmetic operations on uint256
+  const unsafeOps = [
+    { pattern: /uint256\s+\w+\s*=\s*\w+\s*\+\s*\w+/g, op: 'addition' },
+    { pattern: /uint256\s+\w+\s*=\s*\w+\s*-\s*\w+/g, op: 'subtraction' },
+    { pattern: /uint256\s+\w+\s*=\s*\w+\s*\*\s*\w+/g, op: 'multiplication' },
+    { pattern: /\+\+=|\-\-=|\*\*=/g, op: 'compound' }
   ];
   
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const lineNum = i + 1;
-    
-    if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
-    
-    // Check if line involves uint256 arithmetic
-    if (/uint256|uint\s+\w+|\w+\s*:\s*uint/.test(line)) {
-      for (const { pattern, op } of arithmeticPatterns) {
-        if (pattern.test(line)) {
-          issues.push({
-            severity: 'high',
-            category: 'overflow',
-            line: lineNum,
-            pattern: `unsafe-${op}`,
-            description: `Potential ${op} on uint256 without overflow protection (Solidity ${solidityVersion})`,
-            recommendation: 'Upgrade to Solidity ^0.8.0 or use OpenZeppelin SafeMath library'
-          });
-          break;
-        }
-      }
+  for (const { pattern, op } of unsafeOps) {
+    let match;
+    while ((match = pattern.exec(code)) !== null) {
+      const beforeMatch = code.substring(0, match.index);
+      const lineNum = (beforeMatch.match(/\n/g) || []).length + 1;
+      issues.push({
+        severity: 'high',
+        category: 'overflow',
+        line: lineNum,
+        pattern: `unsafe-${op}`,
+        description: `Arithmetic ${op} on uint256 without overflow protection (Solidity <0.8.0 without SafeMath)`,
+        recommendation: 'Upgrade to Solidity 0.8+ or use OpenZeppelin SafeMath library'
+      });
     }
+  }
+  
+  // Check for unchecked blocks in 0.8+
+  const uncheckedPattern = /unchecked\s*\{/g;
+  let uncheckedMatch;
+  while ((uncheckedMatch = uncheckedPattern.exec(code)) !== null) {
+    const beforeUncheck = code.substring(0, uncheckedMatch.index);
+    const lineNum = (beforeUncheck.match(/\n/g) || []).length + 1;
+    issues.push({
+      severity: 'medium',
+      category: 'overflow',
+      line: lineNum,
+      pattern: 'unchecked-block',
+      description: 'Unchecked arithmetic block - overflow/underflow not caught',
+      recommendation: 'Ensure unchecked block is intentional and values are bounded'
+    });
   }
   
   return issues;
 }
 
 /**
- * Access Control Detection
- * Pattern: state-changing functions without onlyOwner or similar modifiers
+ * Check for access control vulnerabilities
+ * Pattern: sensitive functions missing onlyOwner or role-based access
  */
 function checkAccessControl(code: string): AuditIssue[] {
   const issues: AuditIssue[] = [];
   const lines = code.split('\n');
   
   // Check for Ownable import
-  const hasOwnable = /import.*Ownable/.test(code) || /is\s+Ownable/.test(code);
+  const hasOwnable = /import.*Ownable|is\s+Ownable/.test(code);
   
-  // Known access control modifiers
-  const accessModifiers = ['onlyOwner', 'onlyAdmin', 'onlyRole', 'restricted', 'authorized'];
+  // Sensitive function patterns that should have access control
+  const sensitivePatterns = [
+    /function\s+(withdraw|transferOwnership|pause|unpause|mint|burn|set)/,
+    /function\s+\w+\s*\([^)]*\)\s*(?:external|public)[^}]*\{[^}]*(?:balanceOf|onlyOwner|msg\.sender)/
+  ];
   
   let inFunction = false;
   let functionName = '';
-  let functionStartLine = 0;
-  let hasModifier = false;
-  let isStateChanging = false;
-  let braceCount = 0;
-  
-  const stateChangingPatterns = [
-    /\s+\w+\s*=\s*/,
-    /\s+\w+\s*\+=\s*/,
-    /\s+\w+\s*\-=\s*/,
-    /emit\s+\w+\(/,
-    /selfdestruct\(/,
-    /\.transfer\(/,
-    /\.send\(/,
-    /\.call\{/ 
-  ];
+  let functionLine = 0;
+  let hasAccessControl = false;
+  let functionBody = '';
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const lineNum = i + 1;
     
-    // Detect function start
-    const funcMatch = line.match(/function\s+(\w+)\s*\([^)]*\)\s*(?:([a-z]+)\s+)?(?:([a-zA-Z_][a-zA-Z0-9_]*)\s+)?/);
+    // Detect function start with sensitive names
+    const funcMatch = line.match(/function\s+(\w+)\s*\([^)]*\)\s*(external|public|internal|private)?/);
     if (funcMatch) {
       inFunction = true;
       functionName = funcMatch[1];
-      functionStartLine = lineNum;
-      hasModifier = false;
-      isStateChanging = false;
-      braceCount = 0;
-      
-      // Check for access modifiers in function signature
-      for (const modifier of accessModifiers) {
-        if (line.includes(modifier)) {
-          hasModifier = true;
-          break;
-        }
-      }
-      
-      // Check visibility - public/external functions that change state need protection
-      const visibility = line.match(/(public|external)/);
-      if (!visibility && !line.includes('private') && !line.includes('internal')) {
-        // Default visibility, check if state-changing
-      }
+      functionLine = lineNum;
+      hasAccessControl = /onlyOwner|onlyRole|accessControl|require\s*\([^,]*sender/.test(line);
+      functionBody = '';
     }
     
     if (inFunction) {
-      braceCount += (line.match(/\{/g) || []).length;
-      braceCount -= (line.match(/\}/g) || []).length;
+      functionBody += line + '\n';
       
-      // Check for state changes
-      if (!isStateChanging) {
-        for (const pattern of stateChangingPatterns) {
-          if (pattern.test(line) && !line.trim().startsWith('//')) {
-            isStateChanging = true;
-            break;
-          }
-        }
+      // Check for access control modifiers in function body
+      if (/onlyOwner|onlyRole|modifier/.test(line)) {
+        hasAccessControl = true;
       }
       
-      // Function ended
-      if (braceCount === 0 && inFunction) {
-        // Skip constructors and view/pure functions
-        const isConstructor = functionName === 'constructor' || functionName === 'initialize';
-        const isViewOrPure = lines[functionStartLine - 1]?.match(/(view|pure)/);
+      // Check for require sender checks
+      if (/require\s*\([^)]*msg\.sender/.test(line)) {
+        hasAccessControl = true;
+      }
+      
+      // Detect function end
+      if (/^\s*\}\s*$/.test(line) && functionBody.split('\n').length > 1) {
+        // Check if function is sensitive and lacks access control
+        const isSensitive = sensitivePatterns.some(p => p.test(`function ${functionName}`));
+        const isExternalPublic = /external|public/.test(functionBody);
+        const modifiesState = /[=+\-*/%]=|\+\+|--/.test(functionBody);
         
-        if (isStateChanging && !hasModifier && !isConstructor && !isViewOrPure) {
-          // Check if function name implies admin action
-          const adminKeywords = ['set', 'update', 'change', 'modify', 'withdraw', 'transfer', 'mint', 'burn', 'pause', 'unpause'];
-          const isAdminFunction = adminKeywords.some(kw => functionName.toLowerCase().includes(kw));
-          
-          if (isAdminFunction || functionName.toLowerCase().includes('owner')) {
-            issues.push({
-              severity: 'high',
-              category: 'access_control',
-              line: functionStartLine,
-              pattern: 'missing-access-modifier',
-              description: `State-changing function '${functionName}' lacks access control modifier`,
-              recommendation: 'Add onlyOwner or role-based access control modifier'
-            });
-          }
+        if (isSensitive && isExternalPublic && modifiesState && !hasAccessControl) {
+          issues.push({
+            severity: 'critical',
+            category: 'access_control',
+            line: functionLine,
+            pattern: 'missing-access-control',
+            description: `Function '${functionName}' modifies state but lacks access control modifier`,
+            recommendation: 'Add onlyOwner modifier or implement role-based access control'
+          });
         }
+        
         inFunction = false;
       }
     }
   }
   
+  // Check for owner variable without protection
+  if (/address\s+owner\s*=/.test(code) && !/onlyOwner/.test(code)) {
+    issues.push({
+      severity: 'high',
+      category: 'access_control',
+      line: 1,
+      pattern: 'unprotected-owner',
+      description: 'Owner variable defined but no access control enforcement found',
+      recommendation: 'Use OpenZeppelin Ownable contract for standardized access control'
+    });
+  }
+  
   return issues;
 }
 
 /**
- * Initialization Detection
- * Pattern: Missing constructor initialization or improper initialize function
+ * Check for initialization vulnerabilities
+ * Pattern: missing constructor initialization, uninitialized proxies
  */
 function checkInitialization(code: string): AuditIssue[] {
   const issues: AuditIssue[] = [];
   const lines = code.split('\n');
   
+  // Check if contract uses proxy pattern (has initializer)
+  const isProxy = /initializer|Initializable/.test(code);
+  
+  // Check for constructor
   const hasConstructor = /constructor\s*\(/.test(code);
-  const hasInitialize = /function\s+initialize\s*\(/.test(code);
-  const isUpgradeable = /is\s+.*Initializable/.test(code) || /import.*Initializable/.test(code);
   
-  // Check for uninitialized state variables
-  const stateVarPattern = /(uint|address|bool|mapping|\w+)\s+(\w+)\s*[;=]/g;
-  const stateVars: { name: string; line: number; initialized: boolean }[] = [];
+  // Check for critical state variables
+  const criticalVars = [
+    { pattern: /address\s+(owner|admin|treasury)/, name: 'owner/admin' },
+    { pattern: /uint256\s+(totalSupply|maxSupply)/, name: 'supply' },
+    { pattern: /bool\s+(initialized|paused)/, name: 'state flag' }
+  ];
   
-  let inContract = false;
-  let contractStartLine = 0;
+  let constructorBody = '';
+  let inConstructor = false;
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const lineNum = i + 1;
     
-    if (line.match(/contract\s+\w+/)) {
-      inContract = true;
-      contractStartLine = lineNum;
+    if (/constructor\s*\(/.test(line)) {
+      inConstructor = true;
+      constructorBody = '';
     }
     
-    if (inContract && line.match(/^\s*(uint|address|bool|mapping|\w+)\s+\w+\s*[;=]/)) {
-      const varMatch = line.match(/\w+\s+(\w+)\s*[;=]/);
-      if (varMatch && !line.includes('constant') && !line.includes('immutable')) {
-        stateVars.push({
-          name: varMatch[1],
-          line: lineNum,
-          initialized: line.includes('=') || line.includes('constructor') || line.includes('initialize')
-        });
+    if (inConstructor) {
+      constructorBody += line + '\n';
+      if (/^\s*\}\s*$/.test(line)) {
+        inConstructor = false;
       }
-    }
-    
-    if (line.match(/^\s*\}\s*$/) && inContract) {
-      inContract = false;
     }
   }
   
-  // Check for proper initialization pattern
-  if (isUpgradeable && !hasInitialize) {
+  // Check for uninitialized critical variables
+  for (const { pattern, name } of criticalVars) {
+    const varMatch = code.match(pattern);
+    if (varMatch) {
+      const varName = varMatch[0].match(/(owner|admin|treasury|totalSupply|maxSupply|initialized|paused)/)?.[0];
+      if (varName) {
+        // Check if initialized in constructor
+        const initPattern = new RegExp(`${varName}\\s*=`);
+        if (!initPattern.test(constructorBody) && !initPattern.test(code.substring(0, code.indexOf('constructor')))) {
+          const lineNum = (code.substring(0, varMatch.index).match(/\n/g) || []).length + 1;
+          issues.push({
+            severity: 'high',
+            category: 'initialization',
+            line: lineNum,
+            pattern: 'uninitialized-critical-var',
+            description: `Critical variable '${varName}' may not be properly initialized`,
+            recommendation: 'Initialize all critical state variables in constructor or initializer function'
+          });
+        }
+      }
+    }
+  }
+  
+  // Check for proxy initialization pattern
+  if (isProxy && !/function\s+initialize\s*\(/.test(code)) {
     issues.push({
       severity: 'critical',
       category: 'initialization',
-      line: contractStartLine,
-      pattern: 'missing-initialize-function',
-      description: 'Upgradeable contract lacks initialize() function',
-      recommendation: 'Add initialize() function with initializer modifier for upgradeable contracts'
+      line: 1,
+      pattern: 'missing-proxy-initializer',
+      description: 'Proxy-compatible contract missing initialize() function',
+      recommendation: 'Implement initialize() function with initializer modifier for upgradeable contracts'
     });
   }
   
-  if (!isUpgradeable && !hasConstructor && stateVars.length > 0) {
-    // Check if any state vars are uninitialized
-    const uninitialized = stateVars.filter(v => !v.initialized);
-    if (uninitialized.length > 0) {
+  // Check for constructor with no parameters but state variables exist
+  const stateVars = code.match(/(?:uint|address|bool|mapping)\s+\w+\s*;/g) || [];
+  if (hasConstructor && stateVars.length > 0 && !/\(.*\)/.test(code.match(/constructor\s*\([^)]*\)/)?.[0] || '')) {
+    // Constructor exists but may not initialize all vars
+    const initCount = (constructorBody.match(/=\s*[^;]+;/g) || []).length;
+    if (initCount < stateVars.length / 2) {
       issues.push({
         severity: 'medium',
         category: 'initialization',
-        line: uninitialized[0].line,
-        pattern: 'uninitialized-state',
-        description: `State variables may be uninitialized: ${uninitialized.map(v => v.name).join(', ')}`,
-        recommendation: 'Add constructor to initialize state variables or use default values'
-      });
-    }
-  }
-  
-  // Check for missing initializer modifier on initialize function
-  if (hasInitialize && isUpgradeable) {
-    const initLine = lines.findIndex(l => /function\s+initialize\s*\(/.test(l));
-    if (initLine >= 0 && !lines[initLine].includes('initializer')) {
-      issues.push({
-        severity: 'critical',
-        category: 'initialization',
-        line: initLine + 1,
-        pattern: 'missing-initializer-modifier',
-        description: 'initialize() function lacks initializer modifier',
-        recommendation: 'Add initializer modifier to prevent re-initialization attacks'
+        line: 1,
+        pattern: 'partial-initialization',
+        description: 'Constructor may not initialize all state variables',
+        recommendation: 'Ensure all state variables are explicitly initialized in constructor'
       });
     }
   }
@@ -386,66 +367,73 @@ function checkInitialization(code: string): AuditIssue[] {
 }
 
 /**
- * Additional Mythril-inspired Heuristics
+ * Additional Mythril-inspired heuristics
  */
 function checkHeuristics(code: string): AuditIssue[] {
   const issues: AuditIssue[] = [];
-  const lines = code.split('\n');
   
   // Check for tx.origin usage (phishing vulnerability)
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (/tx\.origin/.test(line) && !line.trim().startsWith('//')) {
-      issues.push({
-        severity: 'critical',
-        category: 'access_control',
-        line: i + 1,
-        pattern: 'tx-origin-usage',
-        description: 'tx.origin used for authentication - vulnerable to phishing attacks',
-        recommendation: 'Use msg.sender instead of tx.origin for access control'
-      });
-    }
+  if (/tx\.origin/.test(code)) {
+    const lineNum = (code.substring(0, code.indexOf('tx.origin')).match(/\n/g) || []).length + 1;
+    issues.push({
+      severity: 'critical',
+      category: 'access_control',
+      line: lineNum,
+      pattern: 'tx-origin-usage',
+      description: 'tx.origin used for authentication - vulnerable to phishing attacks',
+      recommendation: 'Use msg.sender instead of tx.origin for access control'
+    });
   }
   
-  // Check for weak randomness
-  if (/block\.timestamp|block\.number|block\.hash|now/.test(code)) {
-    const lineNum = lines.findIndex(l => /block\.timestamp|block\.number|now/.test(l)) + 1;
+  // Check for block.timestamp usage in critical logic
+  if (/block\.(timestamp|number)/.test(code)) {
+    const lineNum = (code.substring(0, code.indexOf('block.')).match(/\n/g) || []).length + 1;
     issues.push({
       severity: 'medium',
       category: 'other',
       line: lineNum,
-      pattern: 'weak-randomness',
-      description: 'Block properties used - predictable by miners/validators',
-      recommendation: 'Use Chainlink VRF or commit-reveal scheme for randomness'
+      pattern: 'timestamp-dependency',
+      description: 'Contract logic depends on block.timestamp - miners can manipulate',
+      recommendation: 'Avoid using block.timestamp for critical randomness or timing'
     });
   }
   
-  // Check for unchecked blocks (Solidity 0.8+)
-  const pragmaMatch = code.match(/pragma\s+solidity\s+\^?([0-9.]+)/);
-  const solidityVersion = pragmaMatch ? pragmaMatch[1] : '0.0.0';
-  if (solidityVersion >= '0.8.0' && /unchecked\s*\{/.test(code)) {
-    const lineNum = lines.findIndex(l => /unchecked\s*\{/.test(l)) + 1;
+  // Check for low-level calls without validation
+  if (/\.call\s*\(.*\)\s*;/g.test(code) && !/success.*=.*\.call/.test(code)) {
+    const lineNum = (code.substring(0, code.indexOf('.call')).match(/\n/g) || []).length + 1;
     issues.push({
-      severity: 'info',
-      category: 'overflow',
-      line: lineNum,
-      pattern: 'unchecked-block',
-      description: 'Unchecked block disables overflow protection',
-      recommendation: 'Ensure arithmetic in unchecked blocks is provably safe'
-    });
-  }
-  
-  // Check for missing events on state changes
-  const hasStateChange = /\s+\w+\s*=\s*/.test(code);
-  const hasEvents = /emit\s+\w+\(/.test(code);
-  if (hasStateChange && !hasEvents) {
-    issues.push({
-      severity: 'low',
+      severity: 'high',
       category: 'other',
-      line: 1,
-      pattern: 'missing-events',
-      description: 'State changes without events - reduces off-chain visibility',
-      recommendation: 'Emit events for important state changes for indexing and monitoring'
+      line: lineNum,
+      pattern: 'unchecked-call-return',
+      description: 'Low-level call return value not checked',
+      recommendation: 'Always check the return value of .call() and handle failures'
+    });
+  }
+  
+  // Check for selfdestruct
+  if (/selfdestruct\(/.test(code)) {
+    const lineNum = (code.substring(0, code.indexOf('selfdestruct')).match(/\n/g) || []).length + 1;
+    issues.push({
+      severity: 'high',
+      category: 'other',
+      line: lineNum,
+      pattern: 'selfdestruct-usage',
+      description: 'selfdestruct used - contract can be forcibly terminated',
+      recommendation: 'Ensure selfdestruct is protected and intentional'
+    });
+  }
+  
+  // Check for delegatecall to external address
+  if (/delegatecall\(/.test(code)) {
+    const lineNum = (code.substring(0, code.indexOf('delegatecall')).match(/\n/g) || []).length + 1;
+    issues.push({
+      severity: 'critical',
+      category: 'other',
+      line: lineNum,
+      pattern: 'delegatecall-usage',
+      description: 'delegatecall to potentially untrusted address - storage corruption risk',
+      recommendation: 'Whitelist delegatecall targets and validate addresses'
     });
   }
   
@@ -453,7 +441,7 @@ function checkHeuristics(code: string): AuditIssue[] {
 }
 
 /**
- * Calculate risk score from issues
+ * Calculate risk score based on issues found
  */
 function calculateRiskScore(issues: AuditIssue[]): number {
   let score = 0;
@@ -464,7 +452,7 @@ function calculateRiskScore(issues: AuditIssue[]): number {
 }
 
 /**
- * Generate summary counts
+ * Generate summary counts by severity
  */
 function generateSummary(issues: AuditIssue[]): AuditReport['summary'] {
   return {
@@ -477,52 +465,72 @@ function generateSummary(issues: AuditIssue[]): AuditReport['summary'] {
 }
 
 /**
- * Main audit function - analyzes Solidity code and returns report
- * @param code - Solidity source code to audit
- * @returns AuditReport with risk score and issues
+ * Main audit function - analyzes Solidity code and returns audit report
+ * @param code - Solidity source code to analyze
+ * @returns AuditReport with risk score and issues list
  */
 export function auditContract(code: string): AuditReport {
-  const allIssues: AuditIssue[] = [
-    ...checkReentrancy(code),
-    ...checkOverflow(code),
-    ...checkAccessControl(code),
-    ...checkInitialization(code),
-    ...checkHeuristics(code)
-  ];
+  // Run all checks
+  const reentrancyIssues = checkReentrancy(code);
+  const overflowIssues = checkOverflow(code);
+  const accessControlIssues = checkAccessControl(code);
+  const initializationIssues = checkInitialization(code);
+  const heuristicIssues = checkHeuristics(code);
   
-  // Deduplicate issues by line and pattern
-  const uniqueIssues = allIssues.filter((issue, index, self) =>
-    index === self.findIndex(i => i.line === issue.line && i.pattern === issue.pattern)
-  );
+  // Combine all issues
+  const allIssues = [
+    ...reentrancyIssues,
+    ...overflowIssues,
+    ...accessControlIssues,
+    ...initializationIssues,
+    ...heuristicIssues
+  ];
   
   // Sort by severity
   const severityOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
-  uniqueIssues.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+  allIssues.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
   
-  const riskScore = calculateRiskScore(uniqueIssues);
-  const summary = generateSummary(uniqueIssues);
+  // Calculate metrics
+  const riskScore = calculateRiskScore(allIssues);
+  const summary = generateSummary(allIssues);
   
   return {
+    code,
     riskScore,
-    issues: uniqueIssues,
+    issues: allIssues,
     summary,
-    passed: riskScore < 25, // Pass if no critical/high issues
+    passed: riskScore < 25, // Pass if risk score is low
     timestamp: Date.now()
   };
 }
 
 /**
- * Quick validation - returns true if code passes basic safety checks
+ * Format audit report as human-readable string
  */
-export function isCodeSafe(code: string): boolean {
-  const report = auditContract(code);
-  return report.passed;
+export function formatAuditReport(report: AuditReport): string {
+  const status = report.passed ? '✅ PASSED' : '❌ FAILED';
+  let output = `\n=== NoLangX Audit Report ===\n`;
+  output += `Status: ${status}\n`;
+  output += `Risk Score: ${report.riskScore}/100\n`;
+  output += `Issues Found: ${report.issues.length}\n`;
+  output += `  Critical: ${report.summary.critical}\n`;
+  output += `  High: ${report.summary.high}\n`;
+  output += `  Medium: ${report.summary.medium}\n`;
+  output += `  Low: ${report.summary.low}\n`;
+  output += `\n--- Detailed Issues ---\n`;
+  
+  if (report.issues.length === 0) {
+    output += 'No issues detected.\n';
+  } else {
+    for (const issue of report.issues) {
+      output += `\n[${issue.severity.toUpperCase()}] ${issue.category}\n`;
+      output += `  Line ${issue.line}: ${issue.description}\n`;
+      output += `  Pattern: ${issue.pattern}\n`;
+      output += `  Fix: ${issue.recommendation}\n`;
+    }
+  }
+  
+  return output;
 }
 
-/**
- * Get critical issues only
- */
-export function getCriticalIssues(code: string): AuditIssue[] {
-  const report = auditContract(code);
-  return report.issues.filter(i => i.severity === 'critical');
-}
+export default { auditContract, formatAuditReport };
