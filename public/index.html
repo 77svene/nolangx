@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NoLangX - Natural Language Smart Contracts</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.ethers.io/lib/ethers-5.2.umd.min.js" type="application/javascript"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤖 NoLangX</h1>
+            <p class="tagline">Natural Language → Audited Smart Contracts → ZK Verified</p>
+            <button id="connectWallet" class="wallet-btn">Connect Wallet</button>
+            <span id="walletAddress" class="wallet-status"></span>
+        </header>
+
+        <main class="chat-container">
+            <div id="chatHistory" class="chat-history">
+                <div class="message bot">
+                    <div class="message-content">
+                        <p>Welcome to NoLangX! I'm your AI smart contract agent.</p>
+                        <p>Describe what you want to build in natural language. For example:</p>
+                        <ul>
+                            <li>"Create a staking pool with 12% APY that accepts USDC"</li>
+                            <li>"Deploy a timelock contract with 24 hour delay"</li>
+                            <li>"Create a multi-sig wallet requiring 3 of 5 signatures"</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-area">
+                <textarea id="userInput" placeholder="Describe your smart contract..." rows="3"></textarea>
+                <button id="sendBtn" class="send-btn">Generate Contract</button>
+            </div>
+        </main>
+
+        <div id="previewPanel" class="preview-panel hidden">
+            <div class="panel-header">
+                <h2>Contract Preview</h2>
+                <button id="closePreview" class="close-btn">×</button>
+            </div>
+            <div class="panel-content">
+                <div class="status-section">
+                    <h3>Generation Status</h3>
+                    <div id="genStatus" class="status-indicator pending">⏳ Generating...</div>
+                </div>
+
+                <div class="status-section">
+                    <h3>Audit Results</h3>
+                    <div id="auditStatus" class="status-indicator pending">⏳ Analyzing...</div>
+                    <div id="auditDetails" class="audit-details"></div>
+                </div>
+
+                <div class="status-section">
+                    <h3>ZK Proof</h3>
+                    <div id="zkStatus" class="status-indicator pending">⏳ Generating Proof...</div>
+                    <div id="zkDetails" class="zk-details"></div>
+                </div>
+
+                <div class="status-section">
+                    <h3>Deployment</h3>
+                    <div id="deployStatus" class="status-indicator pending">⏳ Ready to Deploy</div>
+                    <div id="deployDetails" class="deploy-details"></div>
+                </div>
+
+                <div class="code-section">
+                    <h3>Generated Solidity</h3>
+                    <pre id="contractCode" class="code-block"><code></code></pre>
+                </div>
+
+                <div class="action-buttons">
+                    <button id="deployBtn" class="deploy-btn" disabled>Deploy to Chain</button>
+                    <button id="downloadBtn" class="download-btn">Download Contract</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="toast" class="toast hidden"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

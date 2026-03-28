@@ -1,0 +1,36 @@
+{
+  "project": "NoLangX: Natural Language Smart Contract Agent",
+  "hackathon": "Microsoft AI Agents Hackathon (April 8-30 2026) - $50K+ AI Agents Track",
+  "repo": "https://github.com/77svene/nolangx",
+  "deployed": {
+    "deployed": false,
+    "reason": "no-contracts-dir"
+  },
+  "pushed": true,
+  "submission": {
+    "platform": "devpost",
+    "payloadFile": "submission_payload.json",
+    "automationFile": "submit.spec.js"
+  },
+  "verification": {
+    "allPass": false,
+    "checks": [
+      {
+        "check": "github_repo",
+        "pass": false,
+        "detail": "size=0KB, stars=0"
+      },
+      {
+        "check": "recent_commit",
+        "pass": true,
+        "detail": "f55e18f: feat: SHIP NoLangX: Natural Language Smart Contract Agent | all tasks complete |"
+      },
+      {
+        "check": "readme_exists",
+        "pass": false,
+        "detail": "missing"
+      }
+    ]
+  },
+  "completedAt": "2026-03-26T22:16:55.063Z"
+}

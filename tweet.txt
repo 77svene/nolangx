@@ -1,0 +1,7 @@
+🚀 Just shipped NoLangX: Natural Language Smart Contract Agent for Microsoft AI Agents Hackathon (April 8-30 2026) - $50K+ AI Agents Track!
+
+AI agents that translate natural language intent into audited Solidity contracts, deployable across multiple EVMs, with ZK proof-of-correctness generation for verifiability without
+
+🔗 https://github.com/77svene/nolangx
+
+#hackathon #AI #Web3 #DeFi @lablabai

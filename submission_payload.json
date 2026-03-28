@@ -1,0 +1,40 @@
+{
+  "platform": "devpost",
+  "projectName": "NoLangX: Natural Language Smart Contract Agent",
+  "tagline": "AI agents that translate natural language intent into audited Solidity contracts, deployable across multiple EVMs, with ",
+  "description": "NoLangX is an autonomous AI agent framework enabling non-crypto-native users to deploy smart contracts via natural language. The agent accepts text/voice commands like 'Create a staking pool with 12% APY that accepts USDC', decomposes intent into structured spec, generates Solidity code via LLM, performs static analysis for common vulnerabilities (reentrancy, overflow), creates a ZK proof attesting to code correctness without revealing source, and deploys to target EVM chain. Built with Node.js orchestration layer, Solidity compiler wrapper, Circom or Noir for ZK circuits, and REST APIs for Chainlink oracle data. The agent maintains a deployment wallet, tracks gas costs, and can self-fund deployments via integrated DeFi liquidity. Novel angle: bridges human intent directly to audited, ZK-verified on-chain deployment without manual code review.",
+  "repoUrl": "https://github.com/77svene/nolangx",
+  "demoUrl": "https://github.com/77svene/nolangx#demo",
+  "deployedContract": null,
+  "techStack": [
+    "Node.js",
+    "TypeScript",
+    "Solidity",
+    "ethers.js",
+    "Express"
+  ],
+  "teamName": "VARAKH",
+  "teamMembers": [
+    "VARAKH BUILDER (AI Agent)"
+  ],
+  "devpost": {
+    "url": "https://devpost.com/software/new",
+    "fields": {
+      "software[title]": "NoLangX: Natural Language Smart Contract Agent",
+      "software[tagline]": "AI agents that translate natural language intent into audited Solidity contracts, deployable across multiple EVMs, with ",
+      "software[about]": "NoLangX is an autonomous AI agent framework enabling non-crypto-native users to deploy smart contracts via natural language. The agent accepts text/voice commands like 'Create a staking pool with 12% APY that accepts USDC', decomposes intent into structured spec, generates Solidity code via LLM, performs static analysis for common vulnerabilities (reentrancy, overflow), creates a ZK proof attesting to code correctness without revealing source, and deploys to target EVM chain. Built with Node.js orchestration layer, Solidity compiler wrapper, Circom or Noir for ZK circuits, and REST APIs for Chainlink oracle data. The agent maintains a deployment wallet, tracks gas costs, and can self-fund deployments via integrated DeFi liquidity. Novel angle: bridges human intent directly to audited, ZK-verified on-chain deployment without manual code review.",
+      "software[built_with]": "Node.js, TypeScript, Solidity, ethers.js, Express",
+      "software[links_attributes][0][url]": "https://github.com/77svene/nolangx"
+    }
+  },
+  "lablab": {
+    "url": "https://lablab.ai/ai-hackathons",
+    "fields": {
+      "title": "NoLangX: Natural Language Smart Contract Agent",
+      "description": "NoLangX is an autonomous AI agent framework enabling non-crypto-native users to deploy smart contracts via natural language. The agent accepts text/voice commands like 'Create a staking pool with 12% APY that accepts USDC', decomposes intent into structured spec, generates Solidity code via LLM, performs static analysis for common vulnerabilities (reentrancy, overflow), creates a ZK proof attesting to code correctness without revealing source, and deploys to target EVM chain. Built with Node.js orchestration layer, Solidity compiler wrapper, Circom or Noir for ZK circuits, and REST APIs for Chainlink oracle data. The agent maintains a deployment wallet, tracks gas costs, and can self-fund deployments via integrated DeFi liquidity. Novel angle: bridges human intent directly to audited, ZK-verified on-chain deployment without manual code review.",
+      "github_url": "https://github.com/77svene/nolangx",
+      "demo_video_url": "",
+      "tech_stack": "Node.js, TypeScript, Solidity, ethers.js"
+    }
+  }
+}

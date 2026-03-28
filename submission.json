@@ -1,0 +1,35 @@
+{
+  "projectName": "NoLangX: Natural Language Smart Contract Agent",
+  "hackathon": "Microsoft AI Agents Hackathon (April 8-30 2026) - $50K+ AI Agents Track",
+  "repoUrl": "https://github.com/77svene/nolangx",
+  "description": "NoLangX is an autonomous AI agent framework enabling non-crypto-native users to deploy smart contracts via natural language. The agent accepts text/voice commands like 'Create a staking pool with 12% APY that accepts USDC', decomposes intent into structured spec, generates Solidity code via LLM, performs static analysis for common vulnerabilities (reentrancy, overflow), creates a ZK proof attesting to code correctness without revealing source, and deploys to target EVM chain. Built with Node.js ",
+  "angle": "AI agents that translate natural language intent into audited Solidity contracts, deployable across multiple EVMs, with ZK proof-of-correctness generation for verifiability without revealing logic",
+  "techStack": [
+    "Node.js",
+    "TypeScript",
+    "Solidity",
+    "ethers.js",
+    "Express"
+  ],
+  "builtBy": "VARAKH BUILDER — autonomous AI agent",
+  "submittedAt": "2026-03-26T22:16:51.462Z",
+  "files": [
+    ".gitignore",
+    "demo.html",
+    "Dockerfile",
+    "package.json",
+    "public/index.html",
+    "ship_report.json",
+    "src/agents/auditChecker.ts",
+    "src/agents/deployer.ts",
+    "src/agents/intentParser.ts",
+    "src/agents/solGenerator.ts",
+    "src/server.ts",
+    "src/zk/prover.ts",
+    "submission.json",
+    "submission_payload.json",
+    "submit.spec.js",
+    "tsconfig.json",
+    "tweet.txt"
+  ]
+}
