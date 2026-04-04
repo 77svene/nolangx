@@ -6,7 +6,7 @@
 
 export interface AuditIssue {
   severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
-  category: 'reentrancy' | 'overflow' | 'access_control' | 'initialization' | 'other';
+  category: 'reentrancy' | 'overflow' | 'access_control' | 'initialization' | 'quantum_vulnerability' | 'other';
   line: number;
   pattern: string;
   description: string;
@@ -369,6 +369,41 @@ function checkInitialization(code: string): AuditIssue[] {
 /**
  * Additional Mythril-inspired heuristics
  */
+function checkQuantumVulnerabilities(code: string): AuditIssue[] {
+  const issues: AuditIssue[] = [];
+
+  // Check for ecrecover
+  if (/ecrecover\s*\(/.test(code)) {
+    const lineNum = (code.substring(0, code.indexOf('ecrecover')).match(/\n/g) || []).length + 1;
+    issues.push({
+      severity: 'high',
+      category: 'quantum_vulnerability',
+      line: lineNum,
+      pattern: 'ecrecover-usage',
+      description: 'ecrecover is vulnerable to Shor\'s algorithm on quantum computers',
+      recommendation: 'Replace standard ECDSA with post-quantum signature schemes like SPHINCS+ or WOTS+'
+    });
+  }
+
+  // Check for ECDSA imports
+  if (/import.*ECDSA|using\s+ECDSA/.test(code)) {
+    const lineNum = (code.substring(0, code.indexOf('ECDSA')).match(/\n/g) || []).length + 1;
+    issues.push({
+      severity: 'high',
+      category: 'quantum_vulnerability',
+      line: lineNum,
+      pattern: 'ecdsa-library-usage',
+      description: 'Usage of OpenZeppelin ECDSA library is not quantum-resistant',
+      recommendation: 'Migrate to quantum-resistant verification algorithms'
+    });
+  }
+
+  return issues;
+}
+
+/**
+ * Additional Mythril-inspired heuristics
+ */
 function checkHeuristics(code: string): AuditIssue[] {
   const issues: AuditIssue[] = [];
   
@@ -476,6 +511,7 @@ export function auditContract(code: string): AuditReport {
   const accessControlIssues = checkAccessControl(code);
   const initializationIssues = checkInitialization(code);
   const heuristicIssues = checkHeuristics(code);
+  const quantumIssues = checkQuantumVulnerabilities(code);
   
   // Combine all issues
   const allIssues = [
@@ -483,7 +519,8 @@ export function auditContract(code: string): AuditReport {
     ...overflowIssues,
     ...accessControlIssues,
     ...initializationIssues,
-    ...heuristicIssues
+    ...heuristicIssues,
+    ...quantumIssues
   ];
   
   // Sort by severity

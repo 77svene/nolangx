@@ -6,6 +6,7 @@ import { generateContract } from './agents/solGenerator';
 import { auditContract } from './agents/auditChecker';
 import { proveCorrectness } from './zk/prover';
 import { deployContract } from './agents/deployer';
+import { LamportSignature } from './crypto/lamport';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -163,7 +164,7 @@ app.get('/api/status/:txHash', async (req: Request, res: Response) => {
 
     const { getDeployer } = await import('./agents/deployer');
     const deployerInstance = getDeployer();
-    const provider = await deployerInstance['rpcManager'].getWorkingProvider(cached?.chainId || 1);
+    const provider = await (deployerInstance as any).rpcManager.getWorkingProvider(cached?.chainId || 1);
     const receipt = await provider.getTransactionReceipt(txHash);
 
     if (!receipt) {
@@ -224,7 +225,7 @@ app.get('/api/audit/:contractAddress', async (req: Request, res: Response) => {
 
     const { getDeployer } = await import('./agents/deployer');
     const deployerInstance = getDeployer();
-    const provider = await deployerInstance['rpcManager'].getWorkingProvider(1);
+    const provider = await (deployerInstance as any).rpcManager.getWorkingProvider(1);
     const bytecode = await provider.getCode(contractAddress);
 
     if (!bytecode || bytecode === '0x') {
@@ -287,18 +288,49 @@ app.get('/api/health', (_req: Request, res: Response) => {
 });
 
 app.get('/api/quantum-keys', (_req: Request, res: Response) => {
-  // Simulate post-quantum keypair generation (e.g., Lamport or WOTS+ keys).
-  // In a real system, this would use a dedicated library like standard NIST candidates.
-  // Here we use crypto.randomBytes to generate a simulated key pair.
-  const privateKeySeed = crypto.randomBytes(32).toString('hex');
-  const publicKey = crypto.createHash('sha256').update(privateKeySeed).digest('hex');
+  try {
+    const keypair = LamportSignature.generateKeypair();
 
-  res.json({
-    message: "Simulated Post-Quantum Keypair generated",
-    privateKeySeed,
-    publicKey: "0x" + publicKey,
-    type: "WOTS+ / Lamport simulated hash-based signature pair"
-  });
+    // Reconstruct the EVM computed public key based on a 0 message hash simulation
+    // instead of returning a dummy string to meet real-world API expectations.
+    const simulationHash = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    const signature = LamportSignature.sign(simulationHash, keypair.privateKey);
+    const evmComputedPublicKey = LamportSignature.computeEVMPublicKey(simulationHash, signature);
+
+    res.json({
+      message: "Post-Quantum EVM-Optimized Lamport Keypair generated",
+      privateKey: keypair.privateKey,
+      publicKey: evmComputedPublicKey,
+      type: "Lamport EVM hash-based signature pair"
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: 'Failed to generate keys', details: errorMessage });
+  }
+});
+
+app.post('/api/quantum-sign', (req: Request, res: Response) => {
+  try {
+    const { messageHash, privateKey } = req.body;
+
+    if (!messageHash || !privateKey || !Array.isArray(privateKey) || privateKey.length !== 256) {
+      res.status(400).json({ error: 'Valid 32-byte messageHash and 256-pair privateKey are required' });
+      return;
+    }
+
+    const signature = LamportSignature.sign(messageHash, privateKey);
+    const evmComputedPublicKey = LamportSignature.computeEVMPublicKey(messageHash, signature);
+
+    res.json({
+      messageHash,
+      signature,
+      evmComputedPublicKey,
+      message: "Message signed successfully"
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: 'Failed to sign message', details: errorMessage });
+  }
 });
 
 app.get('/api/balance', async (_req: Request, res: Response) => {

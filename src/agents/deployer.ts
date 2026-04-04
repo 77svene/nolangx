@@ -459,7 +459,7 @@ if (typeof process !== 'undefined' && process.argv[1]?.includes('deployer')) {
 
   initializeDeployer(privateKey);
   console.log('NoLangX Deployer initialized');
-  console.log('Wallet address:', getDeployer()['wallet'].address);
+  console.log('Wallet address:', (getDeployer() as any).wallet.address);
   console.log('Supported chains:', getDeployer().getSupportedChains().map(c => c.name).join(', '));
 }
 

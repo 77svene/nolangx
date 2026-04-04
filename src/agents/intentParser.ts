@@ -4,7 +4,7 @@ import { StringOutputParser } from '@langchain/core/output_parsers';
 
 // Contract specification interface
 export interface ContractSpec {
-  type: 'staking' | 'swap' | 'escrow' | 'dao' | 'quantumToken';
+  type: 'staking' | 'swap' | 'escrow' | 'dao' | 'quantumToken' | 'quantumMultisig';
   params: Record<string, unknown>;
   chain: string;
   constraints: {
@@ -33,6 +33,7 @@ Contract types:
 - escrow: Trustless third-party holding with release conditions, timeouts
 - dao: Decentralized governance with voting periods, quorum, proposal types
 - quantumToken: Token using post-quantum signatures for transfers
+- quantumMultisig: Multi-signature wallet using Lamport-based post-quantum signatures
 
 Always respond with valid JSON matching the ContractSpec schema.`;
 
@@ -44,13 +45,33 @@ Request: {{input}}
 
 Respond with ONLY this JSON (no markdown, no explanation):
 {
-  "type": "staking" | "swap" | "escrow" | "dao" | "quantumToken",
+  "type": "staking" | "swap" | "escrow" | "dao" | "quantumToken" | "quantumMultisig",
   "params": { /* type-specific parameters */ },
   "chain": "ethereum" | "polygon" | "arbitrum" | "base" | "optimism",
   "constraints": {
     "maxGas": number | null,
     "deadline": number | null,
     "slippage": number | null
+  }
+}
+`);
+
+const quantumMultisigPrompt = PromptTemplate.fromTemplate(`
+Extract quantum multisig parameters from: {{input}}
+
+Respond with ONLY this JSON:
+{
+  "type": "quantumMultisig",
+  "params": {
+    "owners": ["address1", "address2"],
+    "publicKeys": ["bytes32", "bytes32"],
+    "approvalThreshold": number
+  },
+  "chain": "ethereum" | "polygon" | "arbitrum" | "base" | "optimism",
+  "constraints": {
+    "maxGas": number | null,
+    "deadline": number | null,
+    "slippage": null
   }
 }
 `);
@@ -171,7 +192,7 @@ Respond with ONLY this JSON:
 
 // Validation layer
 const VALID_CHAINS = ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism'];
-const VALID_TYPES = ['staking', 'swap', 'escrow', 'dao', 'quantumToken'];
+const VALID_TYPES = ['staking', 'swap', 'escrow', 'dao', 'quantumToken', 'quantumMultisig'];
 
 function validateSpec(spec: Partial<ContractSpec>): ValidationResult {
   const errors: string[] = [];
@@ -283,6 +304,9 @@ class IntentParser {
         return { type: 'dao', confidence: 0.6 };
       }
       if (lowerText.includes('quantum') || lowerText.includes('post-quantum') || lowerText.includes('lamport') || lowerText.includes('wots')) {
+        if (lowerText.includes('multisig') || lowerText.includes('wallet') || lowerText.includes('signers')) {
+            return { type: 'quantumMultisig', confidence: 0.9 };
+        }
         return { type: 'quantumToken', confidence: 0.8 };
       }
       return { type: 'unknown', confidence: 0 };
@@ -307,6 +331,9 @@ class IntentParser {
         break;
       case 'quantumToken':
         prompt = quantumTokenPrompt;
+        break;
+      case 'quantumMultisig':
+        prompt = quantumMultisigPrompt;
         break;
       default:
         prompt = classificationPrompt;
