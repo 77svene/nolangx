@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
-import { intentParser } from './agents/intentParser';
+import crypto from 'crypto';
+import { parseIntent } from './agents/intentParser';
 import { generateContract } from './agents/solGenerator';
 import { auditContract } from './agents/auditChecker';
 import { proveCorrectness } from './zk/prover';
@@ -43,9 +44,10 @@ const deploymentCache = new Map<string, DeploymentState>();
 const auditCache = new Map<string, { score: number; issues: string[]; timestamp: number }>();
 
 async function checkWalletBalance(): Promise<{ balance: string; sufficient: boolean }> {
-  const { deployer } = await import('./agents/deployer');
+  const { getDeployer } = await import('./agents/deployer');
   try {
-    const balance = await deployer.getBalance();
+    const deployerInstance = getDeployer();
+    const balance = await deployerInstance.getBalance(1);
     const minBalance = BigInt('100000000000000000');
     return {
       balance: balance.toString(),
@@ -74,33 +76,43 @@ app.post('/api/deploy', deployLimiter, async (req: Request, res: Response) => {
       return;
     }
 
-    const parsedIntent = await intentParser(intent);
-    if (!parsedIntent.valid) {
-      res.status(400).json({ error: 'Invalid intent', details: parsedIntent.errors });
-      return;
-    }
+    const parsedIntent = await parseIntent(intent);
 
-    const contractCode = await generateContract(parsedIntent.spec);
+    const contractCode = await generateContract(parsedIntent);
     if (!contractCode) {
       res.status(500).json({ error: 'Failed to generate contract code' });
       return;
     }
 
-    const auditResult = await auditContract(contractCode);
-    if (auditResult.score < 70) {
+    const auditResult = await auditContract(contractCode.code);
+    if (auditResult.riskScore > 30) {
       res.status(400).json({
         error: 'Contract failed security audit',
-        score: auditResult.score,
-        issues: auditResult.issues,
+        score: auditResult.riskScore,
+        issues: auditResult.issues.map(i => i.description),
       });
       return;
     }
 
-    const proof = await proveCorrectness(contractCode);
+    const proof = await proveCorrectness(contractCode.code, {
+      noReentrancy: auditResult.issues.filter(i => i.category === 'reentrancy').length === 0,
+      noOverflow: auditResult.issues.filter(i => i.category === 'overflow').length === 0,
+      accessControlled: auditResult.issues.filter(i => i.category === 'access_control').length === 0,
+      initialized: auditResult.issues.filter(i => i.category === 'initialization').length === 0,
+      auditScore: 100 - auditResult.riskScore
+    });
 
-    const deployment = await deployContract(contractCode, chainId);
+    const deployment = await deployContract({
+        bytecode: contractCode.bytecode,
+        abi: contractCode.abi,
+        constructorArgs: Object.values(contractCode.params)
+    }, chainId);
 
     const txHash = deployment.txHash;
+    if (!txHash) {
+       res.status(500).json({ error: 'Deployment failed', details: deployment.error });
+       return;
+    }
     deploymentCache.set(txHash, {
       txHash,
       status: 'pending',
@@ -113,7 +125,7 @@ app.post('/api/deploy', deployLimiter, async (req: Request, res: Response) => {
       txHash,
       status: 'pending',
       chainId,
-      auditScore: auditResult.score,
+      auditScore: auditResult.riskScore,
       proofGenerated: !!proof,
       message: 'Deployment initiated, monitor status via /api/status/:txHash',
     });
@@ -149,8 +161,10 @@ app.get('/api/status/:txHash', async (req: Request, res: Response) => {
       }
     }
 
-    const { deployer } = await import('./agents/deployer');
-    const receipt = await deployer.getTransactionReceipt(txHash);
+    const { getDeployer } = await import('./agents/deployer');
+    const deployerInstance = getDeployer();
+    const provider = await deployerInstance['rpcManager'].getWorkingProvider(cached?.chainId || 1);
+    const receipt = await provider.getTransactionReceipt(txHash);
 
     if (!receipt) {
       res.json({
@@ -165,8 +179,8 @@ app.get('/api/status/:txHash', async (req: Request, res: Response) => {
     const updatedState: DeploymentState = {
       txHash,
       status,
-      contractAddress: receipt.contractAddress,
-      chainId: receipt.chainId,
+      contractAddress: receipt.contractAddress || undefined,
+      chainId: cached?.chainId || 1,
       timestamp: Date.now(),
     };
     deploymentCache.set(txHash, updatedState);
@@ -175,9 +189,9 @@ app.get('/api/status/:txHash', async (req: Request, res: Response) => {
       txHash,
       status,
       contractAddress: receipt.contractAddress,
-      chainId: receipt.chainId,
+      chainId: updatedState.chainId,
       blockNumber: receipt.blockNumber,
-      gasUsed: receipt.gasUsed,
+      gasUsed: receipt.gasUsed.toString(),
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -208,8 +222,10 @@ app.get('/api/audit/:contractAddress', async (req: Request, res: Response) => {
       }
     }
 
-    const { deployer } = await import('./agents/deployer');
-    const bytecode = await deployer.getCode(contractAddress);
+    const { getDeployer } = await import('./agents/deployer');
+    const deployerInstance = getDeployer();
+    const provider = await deployerInstance['rpcManager'].getWorkingProvider(1);
+    const bytecode = await provider.getCode(contractAddress);
 
     if (!bytecode || bytecode === '0x') {
       res.status(404).json({ error: 'Contract not found or has no code' });
@@ -219,16 +235,16 @@ app.get('/api/audit/:contractAddress', async (req: Request, res: Response) => {
     const auditResult = await auditContract(bytecode);
 
     auditCache.set(contractAddress, {
-      score: auditResult.score,
-      issues: auditResult.issues,
+      score: auditResult.riskScore,
+      issues: auditResult.issues.map(i => i.description),
       timestamp: Date.now(),
     });
 
     res.json({
       contractAddress,
-      score: auditResult.score,
-      issues: auditResult.issues,
-      recommendations: auditResult.recommendations,
+      score: auditResult.riskScore,
+      issues: auditResult.issues.map(i => i.description),
+      recommendations: auditResult.issues.map(i => i.recommendation),
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -246,8 +262,9 @@ app.post('/api/verify-proof', async (req: Request, res: Response) => {
       return;
     }
 
-    const { verifyProof } = await import('./zk/prover');
-    const isValid = await verifyProof(proof, publicInputs);
+    const { ZKProver } = await import('./zk/prover');
+    const prover = new ZKProver();
+    const isValid = await prover.verifyProof(proof);
 
     res.json({
       valid: isValid,
@@ -266,6 +283,21 @@ app.get('/api/health', (_req: Request, res: Response) => {
     status: 'healthy',
     timestamp: new Date().toISOString(),
     version: '1.0.0',
+  });
+});
+
+app.get('/api/quantum-keys', (_req: Request, res: Response) => {
+  // Simulate post-quantum keypair generation (e.g., Lamport or WOTS+ keys).
+  // In a real system, this would use a dedicated library like standard NIST candidates.
+  // Here we use crypto.randomBytes to generate a simulated key pair.
+  const privateKeySeed = crypto.randomBytes(32).toString('hex');
+  const publicKey = crypto.createHash('sha256').update(privateKeySeed).digest('hex');
+
+  res.json({
+    message: "Simulated Post-Quantum Keypair generated",
+    privateKeySeed,
+    publicKey: "0x" + publicKey,
+    type: "WOTS+ / Lamport simulated hash-based signature pair"
   });
 });
 
@@ -317,8 +349,9 @@ function gracefulShutdown(signal: string): void {
       console.log('Server closed, all connections terminated');
 
       const handles = setInterval(() => {
-        const activeHandles = process._getActiveHandles();
-        const activeRequests = process._getActiveRequests();
+        const anyProcess = process as any;
+        const activeHandles = anyProcess._getActiveHandles ? anyProcess._getActiveHandles() : [];
+        const activeRequests = anyProcess._getActiveRequests ? anyProcess._getActiveRequests() : [];
 
         if (activeHandles.length === 0 && activeRequests.length === 0) {
           clearInterval(handles);

@@ -4,13 +4,13 @@ import { StringOutputParser } from '@langchain/core/output_parsers';
 
 // Contract specification interface
 export interface ContractSpec {
-  type: 'staking' | 'swap' | 'escrow' | 'dao';
+  type: 'staking' | 'swap' | 'escrow' | 'dao' | 'quantumToken';
   params: Record<string, unknown>;
   chain: string;
   constraints: {
-    maxGas?: number;
-    deadline?: number;
-    slippage?: number;
+    maxGas?: number | null;
+    deadline?: number | null;
+    slippage?: number | null;
   };
   rawIntent: string;
 }
@@ -32,6 +32,7 @@ Contract types:
 - swap: DEX trading with input/output tokens, amounts, slippage tolerance
 - escrow: Trustless third-party holding with release conditions, timeouts
 - dao: Decentralized governance with voting periods, quorum, proposal types
+- quantumToken: Token using post-quantum signatures for transfers
 
 Always respond with valid JSON matching the ContractSpec schema.`;
 
@@ -43,13 +44,33 @@ Request: {{input}}
 
 Respond with ONLY this JSON (no markdown, no explanation):
 {
-  "type": "staking" | "swap" | "escrow" | "dao",
+  "type": "staking" | "swap" | "escrow" | "dao" | "quantumToken",
   "params": { /* type-specific parameters */ },
   "chain": "ethereum" | "polygon" | "arbitrum" | "base" | "optimism",
   "constraints": {
     "maxGas": number | null,
     "deadline": number | null,
     "slippage": number | null
+  }
+}
+`);
+
+const quantumTokenPrompt = PromptTemplate.fromTemplate(`
+Extract quantum token parameters from: {{input}}
+
+Respond with ONLY this JSON:
+{
+  "type": "quantumToken",
+  "params": {
+    "name": string,
+    "symbol": string,
+    "initialSupply": number
+  },
+  "chain": "ethereum" | "polygon" | "arbitrum" | "base" | "optimism",
+  "constraints": {
+    "maxGas": number | null,
+    "deadline": number | null,
+    "slippage": null
   }
 }
 `);
@@ -150,7 +171,7 @@ Respond with ONLY this JSON:
 
 // Validation layer
 const VALID_CHAINS = ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism'];
-const VALID_TYPES = ['staking', 'swap', 'escrow', 'dao'];
+const VALID_TYPES = ['staking', 'swap', 'escrow', 'dao', 'quantumToken'];
 
 function validateSpec(spec: Partial<ContractSpec>): ValidationResult {
   const errors: string[] = [];
@@ -212,7 +233,7 @@ function validateSpec(spec: Partial<ContractSpec>): ValidationResult {
     if (spec.constraints.maxGas !== null && spec.constraints.maxGas !== undefined && spec.constraints.maxGas < 100000) {
       warnings.push('Gas limit seems low. Consider 200000+ for complex contracts.');
     }
-    if (spec.constraints.deadline !== undefined && spec.constraints.deadline < Math.floor(Date.now() / 1000)) {
+    if (spec.constraints.deadline !== undefined && spec.constraints.deadline !== null && spec.constraints.deadline < Math.floor(Date.now() / 1000)) {
       errors.push('Deadline must be in the future');
     }
   }
@@ -261,6 +282,9 @@ class IntentParser {
       if (lowerText.includes('vote') || lowerText.includes('proposal') || lowerText.includes('govern')) {
         return { type: 'dao', confidence: 0.6 };
       }
+      if (lowerText.includes('quantum') || lowerText.includes('post-quantum') || lowerText.includes('lamport') || lowerText.includes('wots')) {
+        return { type: 'quantumToken', confidence: 0.8 };
+      }
       return { type: 'unknown', confidence: 0 };
     }
   }
@@ -280,6 +304,9 @@ class IntentParser {
         break;
       case 'dao':
         prompt = daoPrompt;
+        break;
+      case 'quantumToken':
+        prompt = quantumTokenPrompt;
         break;
       default:
         prompt = classificationPrompt;
@@ -349,4 +376,4 @@ export async function parseIntent(text: string): Promise<ContractSpec> {
   return parser.parse(text);
 }
 
-export { IntentParser, ContractSpec, ValidationResult };
+export { IntentParser, ValidationResult };

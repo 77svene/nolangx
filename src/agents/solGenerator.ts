@@ -1,6 +1,6 @@
 import { OpenAI } from 'openai';
 import { ethers } from 'ethers';
-import { IntentSpec } from './intentParser.js';
+import { ContractSpec } from './intentParser';
 
 /**
  * NoLangX Solidity Contract Generator
@@ -399,26 +399,118 @@ contract MultiSigWallet {
     
     receive() external payable {}
     fallback() external payable {}
+}`,
+
+  quantumToken: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+/**
+ * @title QuantumToken
+ * @dev ERC20 token demonstrating a quantum-proof transfer mechanism.
+ * Uses a simulated post-quantum signature scheme (e.g. WOTS+ / Lamport conceptualization).
+ */
+contract QuantumToken is ERC20, Ownable {
+    mapping(address => bytes32) public publicKeys;
+    mapping(address => uint256) public nonces;
+
+    event PublicKeyRegistered(address indexed account, bytes32 publicKey);
+    event QuantumTransfer(address indexed from, address indexed to, uint256 amount);
+
+    constructor(
+        string memory name,
+        string memory symbol,
+        uint256 initialSupply
+    ) ERC20(name, symbol) Ownable(msg.sender) {
+        _mint(msg.sender, initialSupply);
+    }
+
+    /**
+     * @dev Overrides ERC20 transfer to revert. Transfers must be done via quantumTransfer.
+     */
+    function transfer(address, uint256) public pure override returns (bool) {
+        revert("ECDSA transfers are disabled; use quantumTransfer");
+    }
+
+    /**
+     * @dev Overrides ERC20 transferFrom to revert. Transfers must be done via quantumTransfer.
+     */
+    function transferFrom(address, address, uint256) public pure override returns (bool) {
+        revert("ECDSA transfers are disabled; use quantumTransfer");
+    }
+
+    /**
+     * @dev Register a post-quantum public key hash for the caller.
+     */
+    function registerPublicKey(bytes32 _publicKey) external {
+        publicKeys[msg.sender] = _publicKey;
+        emit PublicKeyRegistered(msg.sender, _publicKey);
+    }
+
+    /**
+     * @dev Quantum-resistant transfer using a hypothetical hash-based signature.
+     * In a real implementation, this would verify a Lamport or WOTS+ signature.
+     * Here we simulate verification by checking a hash commitment.
+     */
+    function quantumTransfer(
+        address to,
+        uint256 amount,
+        bytes32[] calldata signature,
+        bytes32 messageHash
+    ) external {
+        require(publicKeys[msg.sender] != bytes32(0), "Public key not registered");
+        require(to != address(0), "Invalid receiver");
+
+        // Reconstruct message hash for the current nonce
+        bytes32 expectedHash = keccak256(abi.encodePacked(msg.sender, to, amount, nonces[msg.sender]));
+        require(messageHash == expectedHash, "Invalid message hash");
+
+        // Verify the signature against the registered public key.
+        // Simulated: verifySignature(publicKeys[msg.sender], messageHash, signature)
+        require(_simulateQuantumVerification(publicKeys[msg.sender], messageHash, signature), "Invalid quantum signature");
+
+        nonces[msg.sender]++;
+        _transfer(msg.sender, to, amount);
+        emit QuantumTransfer(msg.sender, to, amount);
+    }
+
+    /**
+     * @dev Placeholder for actual post-quantum signature verification.
+     */
+    function _simulateQuantumVerification(
+        bytes32 /*publicKey*/,
+        bytes32 /*message*/,
+        bytes32[] memory signature
+    ) internal pure returns (bool) {
+        // In a real WOTS+/SPHINCS+ implementation, the signature is a list of hashes
+        // that must chain up to the public key roots.
+        require(signature.length > 0, "Empty signature");
+        return true; // Assume valid for demonstration
+    }
 }`
 };
 
 /**
  * Contract type classification based on intent
  */
-function classifyContractType(spec: IntentSpec): string {
-  const intent = spec.intent.toLowerCase();
+function classifyContractType(spec: ContractSpec): string {
+  const intentType = spec.type;
   
-  if (intent.includes('stak') || intent.includes('apy') || intent.includes('reward')) {
+  if (intentType === 'staking') {
     return 'erc20Staking';
   }
-  if (intent.includes('timelock') || intent.includes('delay') || intent.includes('schedule')) {
+  if (intentType === 'escrow') {
     return 'timelock';
   }
-  if (intent.includes('multi') || intent.includes('sign') || intent.includes('wallet')) {
+  if (intentType === 'dao') {
     return 'multisig';
   }
+  if (intentType === 'quantumToken') {
+    return 'quantumToken';
+  }
   
-  // Default to staking for DeFi-related intents
   return 'erc20Staking';
 }
 
@@ -427,72 +519,64 @@ function classifyContractType(spec: IntentSpec): string {
  */
 async function customizeTemplate(
   templateType: string,
-  spec: IntentSpec
+  spec: ContractSpec
 ): Promise<Record<string, any>> {
-  const prompt = `Extract contract parameters from this intent:
-Intent: "${spec.intent}"
-Parsed entities: ${JSON.stringify(spec.entities)}
-
-Return JSON with these fields based on contract type "${templateType}":
-- For erc20Staking: { tokenAddress: string, apyBps: number, rewardDuration: number }
-- For timelock: { minDelay: number }
-- For multisig: { owners: string[], required: number }
-
-Return ONLY valid JSON, no markdown.`;
-
   try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4-turbo-preview',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.1,
-      max_tokens: 500
-    });
-    
-    const content = response.choices[0]?.message?.content || '{}';
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    const params = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
-    
-    // Apply defaults if LLM extraction fails
+    const rawParams: any = spec.params;
     if (templateType === 'erc20Staking') {
       return {
-        tokenAddress: params.tokenAddress || spec.entities?.tokenAddress || '0x0000000000000000000000000000000000000000',
-        apyBps: params.apyBps || Math.round((spec.entities?.apy || 10) * 100),
-        rewardDuration: params.rewardDuration || spec.entities?.duration || 31536000
+        tokenAddress: rawParams.stakingToken || '0x0000000000000000000000000000000000000000',
+        apyBps: rawParams.apy ? Math.round(rawParams.apy * 100) : 1000,
+        rewardDuration: rawParams.lockPeriodDays ? rawParams.lockPeriodDays * 86400 : 31536000
       };
     }
     if (templateType === 'timelock') {
       return {
-        minDelay: params.minDelay || spec.entities?.delay || 86400
+        minDelay: rawParams.timeoutDays ? rawParams.timeoutDays * 86400 : 86400
       };
     }
     if (templateType === 'multisig') {
       return {
-        owners: params.owners || spec.entities?.owners || [],
-        required: params.required || spec.entities?.threshold || 2
+        owners: [],
+        required: rawParams.approvalThreshold ? Math.max(1, Math.floor(rawParams.approvalThreshold / 50)) : 2
       };
     }
-    return params;
+    if (templateType === 'quantumToken') {
+      return {
+        name: rawParams.name || "Quantum Proof Token",
+        symbol: rawParams.symbol || "QPT",
+        initialSupply: rawParams.initialSupply || 1000000
+      };
+    }
+    return rawParams;
   } catch (error) {
-    console.error('LLM customization failed, using defaults:', error);
+    console.error('Template customization failed, using defaults:', error);
     return getDefaultParams(templateType, spec);
   }
 }
 
-function getDefaultParams(templateType: string, spec: IntentSpec): Record<string, any> {
+function getDefaultParams(templateType: string, spec: ContractSpec): Record<string, any> {
   if (templateType === 'erc20Staking') {
     return {
-      tokenAddress: spec.entities?.tokenAddress || '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
-      apyBps: Math.round((spec.entities?.apy || 12) * 100),
-      rewardDuration: spec.entities?.duration || 31536000
+      tokenAddress: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+      apyBps: 1200,
+      rewardDuration: 31536000
     };
   }
   if (templateType === 'timelock') {
-    return { minDelay: spec.entities?.delay || 86400 };
+    return { minDelay: 86400 };
   }
   if (templateType === 'multisig') {
     return {
-      owners: spec.entities?.owners || [],
-      required: spec.entities?.threshold || 2
+      owners: [],
+      required: 2
+    };
+  }
+  if (templateType === 'quantumToken') {
+    return {
+        name: "Quantum Proof Token",
+        symbol: "QPT",
+        initialSupply: 1000000
     };
   }
   return {};
@@ -529,8 +613,8 @@ async function estimateDeploymentGas(
       deployer
     );
     
-    const deployTx = factory.getDeployTransaction(...constructorArgs);
-    const gasEstimate = await provider.estimateGas(deployTx);
+    const deployTx = await factory.getDeployTransaction(...constructorArgs);
+    const gasEstimate = await provider.estimateGas(deployTx as ethers.TransactionRequest);
     
     return gasEstimate;
   } catch (error) {
@@ -544,7 +628,7 @@ async function estimateDeploymentGas(
  * Generate contract from intent spec
  * @returns { code: string, abi: any[], bytecode: string, gasEstimate: bigint, params: Record<string, any> }
  */
-export async function generateContract(spec: IntentSpec): Promise<{
+export async function generateContract(spec: ContractSpec): Promise<{
   code: string;
   abi: any[];
   bytecode: string;
@@ -570,7 +654,11 @@ export async function generateContract(spec: IntentSpec): Promise<{
   const rpcUrl = process.env.RPC_URLS?.split(',')[0] || 'https://eth.llamarpc.com';
   
   // Placeholder ABI - would be generated by solc compilation
-  const abi = contractType === 'erc20Staking' ? [
+  const abi = contractType === 'quantumToken' ? [
+    { "inputs": [{ "name": "name", "type": "string" }, { "name": "symbol", "type": "string" }, { "name": "initialSupply", "type": "uint256" }], "stateMutability": "nonpayable", "type": "constructor" },
+    { "inputs": [{ "name": "to", "type": "address" }, { "name": "amount", "type": "uint256" }, { "name": "signature", "type": "bytes32[]" }, { "name": "messageHash", "type": "bytes32" }], "name": "quantumTransfer", "outputs": [], "stateMutability": "nonpayable", "type": "function" },
+    { "inputs": [{ "name": "_publicKey", "type": "bytes32" }], "name": "registerPublicKey", "outputs": [], "stateMutability": "nonpayable", "type": "function" }
+  ] : contractType === 'erc20Staking' ? [
     { "inputs": [{ "name": "_stakingToken", "type": "address" }, { "name": "_apyBps", "type": "uint256" }, { "name": "_rewardDuration", "type": "uint256" }], "stateMutability": "nonpayable", "type": "constructor" },
     { "inputs": [{ "name": "amount", "type": "uint256" }], "name": "stake", "outputs": [], "stateMutability": "nonpayable", "type": "function" },
     { "inputs": [{ "name": "amount", "type": "uint256" }], "name": "withdraw", "outputs": [], "stateMutability": "nonpayable", "type": "function" },
@@ -595,6 +683,8 @@ export async function generateContract(spec: IntentSpec): Promise<{
     ? [params.tokenAddress, params.apyBps, params.rewardDuration]
     : contractType === 'timelock'
     ? [params.minDelay]
+    : contractType === 'quantumToken'
+    ? [params.name, params.symbol, params.initialSupply]
     : [params.owners, params.required];
   
   const gasEstimate = await estimateDeploymentGas(bytecode, constructorArgs, rpcUrl);

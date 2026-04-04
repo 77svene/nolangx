@@ -10,7 +10,7 @@
  * Chains: Polygon, Arbitrum, Base, Optimism
  */
 
-import { ethers, ContractFactory, Contract, Signer, Wallet, providers } from 'ethers';
+import { ethers, ContractFactory, Contract, Signer, Wallet, JsonRpcProvider } from 'ethers';
 
 // ============================================================================
 // TYPES
@@ -139,7 +139,7 @@ class NativeGasOracle implements GasOracle {
 
         if (!response.ok) continue;
 
-        const data = await response.json();
+        const data = await response.json() as { result?: string };
         if (data.result) {
           const gasPrice = BigInt(data.result);
           this.cache.set(chainId, { price: gasPrice, timestamp: now });
@@ -160,10 +160,10 @@ class NativeGasOracle implements GasOracle {
 // ============================================================================
 
 class RPCManager {
-  private providers: Map<number, providers.JsonRpcProvider[]> = new Map();
+  private providers: Map<number, JsonRpcProvider[]> = new Map();
   private currentIndex: Map<number, number> = new Map();
 
-  getProviders(chainId: number): providers.JsonRpcProvider[] {
+  getProviders(chainId: number): JsonRpcProvider[] {
     const cached = this.providers.get(chainId);
     if (cached) return cached;
 
@@ -173,7 +173,7 @@ class RPCManager {
     }
 
     const providersList = config.rpcUrls.map(
-      url => new providers.JsonRpcProvider(url, chainId)
+      url => new JsonRpcProvider(url, chainId)
     );
 
     this.providers.set(chainId, providersList);
@@ -181,7 +181,7 @@ class RPCManager {
     return providersList;
   }
 
-  async getWorkingProvider(chainId: number): Promise<providers.JsonRpcProvider> {
+  async getWorkingProvider(chainId: number): Promise<JsonRpcProvider> {
     const providersList = this.getProviders(chainId);
     const startIndex = this.currentIndex.get(chainId) || 0;
 
@@ -273,27 +273,36 @@ export class MultiChainDeployer {
         ]);
 
         // Wait for deployment confirmation
-        const deploymentTx = contract.deployTransaction;
+        const deploymentTx = contract.deploymentTransaction();
+        if (!deploymentTx) {
+          throw new Error("Failed to get deployment transaction");
+        }
         const receipt = await provider.waitForTransaction(
           deploymentTx.hash,
           confirmations,
           timeoutMs
         );
 
+        if (!receipt) {
+           throw new Error("Failed to get transaction receipt");
+        }
+
         if (receipt.status === 0) {
           throw new Error('Transaction reverted on chain');
         }
 
-        const explorerUrl = `${config.explorerUrl}/tx/${receipt.transactionHash}`;
+        const explorerUrl = `${config.explorerUrl}/tx/${receipt.hash}`;
+
+        const targetAddress = await contract.getAddress();
 
         return this.createReceipt(
           chainId,
           true,
-          contract.address,
-          receipt.transactionHash,
+          targetAddress,
+          receipt.hash,
           receipt.blockNumber,
           receipt.gasUsed,
-          receipt.effectiveGasPrice,
+          receipt.gasPrice,
           undefined,
           retries,
           explorerUrl
@@ -418,7 +427,7 @@ export function getDeployer(): MultiChainDeployer {
  * Standalone deploy function as specified in task requirements
  * deploy(contract, chainId, options) → DeploymentReceipt
  */
-export async function deploy(
+export async function deployContract(
   contract: {
     bytecode: string;
     abi: any[];
@@ -450,7 +459,7 @@ if (typeof process !== 'undefined' && process.argv[1]?.includes('deployer')) {
 
   initializeDeployer(privateKey);
   console.log('NoLangX Deployer initialized');
-  console.log('Wallet address:', getDeployer().wallet.address);
+  console.log('Wallet address:', getDeployer()['wallet'].address);
   console.log('Supported chains:', getDeployer().getSupportedChains().map(c => c.name).join(', '));
 }
 

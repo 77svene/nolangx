@@ -1,5 +1,5 @@
 import { groth16 } from 'snarkjs';
-import { poseidon } from 'circomlibjs';
+const poseidon = require('circomlibjs').poseidon;
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
@@ -370,7 +370,7 @@ export class ZKProver {
         throw new Error('ZKey file not found. Run circuit compilation first.');
       }
       
-      const vkey = await groth16.exportVerificationKey(this.zkeyPath);
+      const vkey = await (groth16 as any).exportVerificationKey(this.zkeyPath);
       const vkeyJson = JSON.stringify(vkey, null, 2);
       writeFileSync(this.vkeyPath, vkeyJson, 'utf-8');
       return vkeyJson;
