@@ -1,6 +1,7 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { PromptTemplate } from '@langchain/core/prompts';
 import { StringOutputParser } from '@langchain/core/output_parsers';
+import { logger } from '../utils/logger';
 
 // Contract specification interface
 export interface ContractSpec {
@@ -326,7 +327,7 @@ class IntentParser {
     }
 
     if (validation.warnings.length > 0) {
-      console.warn('NoLangX Validation Warnings:', validation.warnings.join('; '));
+      logger.warn('NoLangX Validation Warnings:', validation.warnings.join('; '));
     }
 
     return spec;

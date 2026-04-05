@@ -1,6 +1,7 @@
 import { OpenAI } from 'openai';
 import { ethers } from 'ethers';
 import { IntentSpec } from './intentParser.js';
+import { logger } from '../utils/logger';
 
 /**
  * NoLangX Solidity Contract Generator
@@ -473,7 +474,7 @@ Return ONLY valid JSON, no markdown.`;
     }
     return params;
   } catch (error) {
-    console.error('LLM customization failed, using defaults:', error);
+    logger.error('LLM customization failed, using defaults:', error);
     return getDefaultParams(templateType, spec);
   }
 }
@@ -534,7 +535,7 @@ async function estimateDeploymentGas(
     
     return gasEstimate;
   } catch (error) {
-    console.error('Gas estimation failed:', error);
+    logger.error('Gas estimation failed:', error);
     // Return reasonable default if estimation fails
     return BigInt(3000000); // 3M gas default for complex contracts
   }

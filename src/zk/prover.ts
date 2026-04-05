@@ -3,6 +3,7 @@ import { poseidon } from 'circomlibjs';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
+import { logger } from '../utils/logger';
 
 /**
  * NoLangX ZK Correctness Prover
@@ -265,7 +266,7 @@ export class ZKProver {
           : undefined
       };
     } catch (error) {
-      console.error('Proof generation failed, using fallback:', error);
+      logger.error('Proof generation failed, using fallback:', error);
       return await this.fallbackProve(codeHash, properties);
     }
   }
@@ -340,7 +341,7 @@ export class ZKProver {
         parsedProof
       );
     } catch (error) {
-      console.error('Proof verification failed:', error);
+      logger.error('Proof verification failed:', error);
       return false;
     }
   }
