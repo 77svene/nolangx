@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
+import { logger } from './utils/logger';
 import { intentParser } from './agents/intentParser';
 import { generateContract } from './agents/solGenerator';
 import { auditContract } from './agents/auditChecker';
@@ -284,7 +285,7 @@ app.get('/api/balance', async (_req: Request, res: Response) => {
 });
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('Unhandled error:', err);
+  logger.error('Unhandled error:', err);
   res.status(500).json({
     error: 'Internal server error',
     details: process.env.NODE_ENV === 'development' ? err.message : undefined,
@@ -299,22 +300,22 @@ let server: ReturnType<typeof app.listen> | null = null;
 
 function startServer(): void {
   server = app.listen(PORT, () => {
-    console.log(`NoLangX API server running on port ${PORT}`);
-    console.log(`Trust proxy level: ${TRUST_PROXY}`);
+    logger.info(`NoLangX API server running on port ${PORT}`);
+    logger.info(`Trust proxy level: ${TRUST_PROXY}`);
   });
 }
 
 function gracefulShutdown(signal: string): void {
-  console.log(`Received ${signal}, shutting down gracefully...`);
+  logger.info(`Received ${signal}, shutting down gracefully...`);
 
   if (server) {
     server.close((err) => {
       if (err) {
-        console.error('Error during server close:', err);
+        logger.error('Error during server close:', err);
         process.exit(1);
       }
 
-      console.log('Server closed, all connections terminated');
+      logger.info('Server closed, all connections terminated');
 
       const handles = setInterval(() => {
         const activeHandles = process._getActiveHandles();
@@ -322,14 +323,14 @@ function gracefulShutdown(signal: string): void {
 
         if (activeHandles.length === 0 && activeRequests.length === 0) {
           clearInterval(handles);
-          console.log('All handles cleared, exiting process');
+          logger.info('All handles cleared, exiting process');
           process.exit(0);
         }
       }, 100);
 
       setTimeout(() => {
         clearInterval(handles);
-        console.log('Forced shutdown after timeout');
+        logger.info('Forced shutdown after timeout');
         process.exit(1);
       }, 10000);
     });
@@ -342,12 +343,12 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 process.on('uncaughtException', (err) => {
-  console.error('Uncaught exception:', err);
+  logger.error('Uncaught exception:', err);
   gracefulShutdown('uncaughtException');
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled rejection at:', promise, 'reason:', reason);
+  logger.error(`Unhandled rejection at: ${promise} reason: ${reason}`);
   gracefulShutdown('unhandledRejection');
 });
 

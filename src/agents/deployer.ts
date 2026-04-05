@@ -11,6 +11,7 @@
  */
 
 import { ethers, ContractFactory, Contract, Signer, Wallet, providers } from 'ethers';
+import { logger } from '../utils/logger';
 
 // ============================================================================
 // TYPES
@@ -444,14 +445,14 @@ export async function deploy(
 if (typeof process !== 'undefined' && process.argv[1]?.includes('deployer')) {
   const privateKey = process.env.DEPLOYER_PRIVATE_KEY;
   if (!privateKey) {
-    console.error('DEPLOYER_PRIVATE_KEY not set in environment');
+    logger.error('DEPLOYER_PRIVATE_KEY not set in environment');
     process.exit(1);
   }
 
   initializeDeployer(privateKey);
-  console.log('NoLangX Deployer initialized');
-  console.log('Wallet address:', getDeployer().wallet.address);
-  console.log('Supported chains:', getDeployer().getSupportedChains().map(c => c.name).join(', '));
+  logger.info('NoLangX Deployer initialized');
+  logger.info(`Wallet address: ${getDeployer().wallet.address}`);
+  logger.info(`Supported chains: ${getDeployer().getSupportedChains().map(c => c.name).join(', ')}`);
 }
 
 export default MultiChainDeployer;
