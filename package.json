@@ -14,17 +14,26 @@
     "zk:compile": "circom circuits/*.circom --r1cs -o zk/",
     "lint": "eslint src/**/*.ts"
   },
-  "keywords": ["smart-contracts", "ai-agent", "zk-proofs", "solidity", "natural-language"],
+  "keywords": [
+    "smart-contracts",
+    "ai-agent",
+    "zk-proofs",
+    "solidity",
+    "natural-language"
+  ],
   "author": "NoLangX",
   "license": "MIT",
   "dependencies": {
     "@langchain/community": "^0.0.20",
     "@langchain/core": "^0.1.25",
     "@langchain/openai": "^0.0.14",
+    "@openzeppelin/contracts": "^5.6.1",
     "circomlibjs": "^0.1.7",
     "dotenv": "^16.4.5",
     "ethers": "^6.11.1",
     "express": "^4.18.3",
+    "express-rate-limit": "^8.3.2",
+    "keccak256": "^1.0.6",
     "langchain": "^0.1.17",
     "openai": "^4.29.2",
     "snarkjs": "^0.7.3",
@@ -39,9 +48,11 @@
     "@nomicfoundation/hardhat-verify": "^2.0.5",
     "@typechain/ethers-v6": "^0.5.1",
     "@typechain/hardhat": "^9.1.0",
+    "@types/circomlibjs": "^0.1.6",
     "@types/express": "^4.17.21",
     "@types/mocha": "^10.0.6",
     "@types/node": "^20.11.24",
+    "@types/snarkjs": "^0.7.9",
     "chai": "^4.4.1",
     "circom_runtime": "^0.1.25",
     "ethers": "^6.11.1",
@@ -50,6 +61,6 @@
     "solidity-coverage": "^0.8.11",
     "ts-node": "^10.9.2",
     "typechain": "^8.3.2",
-    "typescript": "^5.4.2"
+    "typescript": "^5.9.3"
   }
 }
